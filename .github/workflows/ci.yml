@@ -1,0 +1,31 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  native:
+    name: ${{ matrix.backend }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-15
+            backend: Metal
+            features: winit,wgpu/metal
+          - os: windows-2022
+            backend: DirectX 12
+            features: winit,wgpu/dx12
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Install stable Rust
+        shell: bash
+        run: rustup toolchain install stable --profile minimal
+      - name: Test native backend
+        run: cargo +stable test --lib --locked --no-default-features --features ${{ matrix.features }}

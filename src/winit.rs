@@ -38,6 +38,7 @@ pub struct Painter {
     surfaces: ViewportIdMap<SurfaceState>,
     capture_tx: CaptureSender,
     capture_rx: CaptureReceiver,
+    gpu_timer: Option<crate::timing::GpuTimer>,
 }
 
 impl Painter {
@@ -78,6 +79,7 @@ impl Painter {
 
             capture_tx,
             capture_rx,
+            gpu_timer: None,
         }
     }
 
@@ -429,6 +431,19 @@ impl Painter {
             return vsync_sec;
         };
 
+        let paint_started = std::time::Instant::now();
+        if self.gpu_timer.is_none()
+            && let Some(profiler) = &self.configuration.gpu_profiler
+        {
+            self.gpu_timer = Some(crate::timing::GpuTimer::new(
+                &render_state.device,
+                &render_state.queue,
+                profiler.clone(),
+                crate::timing::GpuStage::Ui,
+            ));
+        }
+        let upload_started = std::time::Instant::now();
+
         let mut encoder =
             render_state
                 .device
@@ -462,6 +477,8 @@ impl Painter {
             )
         };
 
+        let upload_seconds = upload_started.elapsed().as_secs_f64();
+        let acquire_started = std::time::Instant::now();
         let output_frame = {
             profiling::scope!("get_current_texture");
             // This is what vsync-waiting happens on my Mac.
@@ -471,20 +488,46 @@ impl Painter {
             output_frame
         };
 
+        let acquire_seconds = acquire_started.elapsed().as_secs_f64();
         let output_frame = match output_frame {
             Ok(frame) => frame,
-            Err(err) => match (*self.configuration.on_surface_error)(err) {
-                SurfaceErrorAction::RecreateSurface => {
+            Err(err) => {
+                if let SurfaceErrorAction::RecreateSurface =
+                    (*self.configuration.on_surface_error)(err)
+                {
                     Self::configure_surface(surface_state, render_state, &self.configuration);
-                    return vsync_sec;
                 }
-                SurfaceErrorAction::SkipFrame => {
-                    return vsync_sec;
+                if let Some(observer) = &self.configuration.on_paint_timing {
+                    observer(
+                        viewport_id,
+                        crate::timing::PaintTimings {
+                            rendered: false,
+                            started: paint_started,
+                            finished: std::time::Instant::now(),
+                            upload: upload_seconds,
+                            acquire: acquire_seconds,
+                            encode: 0.,
+                            submit: 0.,
+                            present: 0.,
+                        },
+                    );
                 }
-            },
+                return vsync_sec;
+            }
         };
 
+        let encode_started = std::time::Instant::now();
+        let gpu_slot = if viewport_id == ViewportId::ROOT {
+            self.gpu_timer.as_mut().and_then(|timer| timer.begin())
+        } else {
+            None
+        };
         let mut capture_buffer = None;
+        if viewport_id == ViewportId::ROOT
+            && let Some(timer) = &self.gpu_timer
+        {
+            timer.prepare_encoder(&mut encoder);
+        }
         {
             let renderer = render_state.renderer.read();
 
@@ -535,7 +578,8 @@ impl Painter {
                         stencil_ops: None,
                     }
                 }),
-                timestamp_writes: None,
+                timestamp_writes: gpu_slot
+                    .map(|slot| self.gpu_timer.as_ref().unwrap().writes(slot)),
                 occlusion_query_set: None,
             });
 
@@ -557,11 +601,16 @@ impl Painter {
             }
         }
 
+        if let Some(slot) = gpu_slot {
+            self.gpu_timer.as_ref().unwrap().resolve(slot, &mut encoder);
+        }
         let encoded = {
             profiling::scope!("CommandEncoder::finish");
             encoder.finish()
         };
 
+        let encode_seconds = encode_started.elapsed().as_secs_f64();
+        let submit_started = std::time::Instant::now();
         // Submit the commands: both the main buffer and user-defined ones.
         {
             profiling::scope!("Queue::submit");
@@ -572,6 +621,10 @@ impl Painter {
                 .submit(user_cmd_bufs.into_iter().chain([encoded]));
             vsync_sec += start.elapsed().as_secs_f32();
         };
+        let submit_seconds = submit_started.elapsed().as_secs_f64();
+        if let Some(slot) = gpu_slot {
+            self.gpu_timer.as_ref().unwrap().submitted(slot);
+        }
 
         // Free textures marked for destruction **after** queue submit since they might still be used in the current frame.
         // Calling `wgpu::Texture::destroy` on a texture that is still in use would invalidate the command buffer(s) it is used in.
@@ -595,12 +648,33 @@ impl Painter {
             );
         }
 
+        let present_started = std::time::Instant::now();
         {
             profiling::scope!("present");
             // wgpu doesn't document where vsync can happen. Maybe here?
             let start = web_time::Instant::now();
+            if let Some(on_present) = &self.configuration.on_present {
+                on_present(viewport_id, &surface_state.surface);
+            }
             output_frame.present();
             vsync_sec += start.elapsed().as_secs_f32();
+        }
+
+        let finished = std::time::Instant::now();
+        if let Some(observer) = &self.configuration.on_paint_timing {
+            observer(
+                viewport_id,
+                crate::timing::PaintTimings {
+                    rendered: true,
+                    started: paint_started,
+                    finished,
+                    upload: upload_seconds,
+                    acquire: acquire_seconds,
+                    encode: encode_seconds,
+                    submit: submit_seconds,
+                    present: finished.duration_since(present_started).as_secs_f64(),
+                },
+            );
         }
 
         vsync_sec

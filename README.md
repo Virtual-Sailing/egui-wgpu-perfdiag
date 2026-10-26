@@ -1,3 +1,18 @@
+# egui-wgpu-perfdiag
+
+Standalone Git fork of `egui-wgpu` 0.33.3 for SailSim performance diagnostics.
+The Rust package remains named `egui-wgpu` so it can replace the upstream crate
+through Cargo's `[patch.crates-io]` mechanism.
+
+See [PERFDIAG.md](PERFDIAG.md) for the changes, dependency setup, and validation.
+Unmodified sibling crates use crates.io releases; no upstream workspace checkout
+is required. This fork is consumed from Git and is not published to crates.io.
+
+Metal GPU timing also requires the matching `wgpu-hal-perfdiag` override.
+Applications must declare both overrides; patches in dependencies are ignored.
+
+---
+
 # egui-wgpu
 
 [![Latest version](https://img.shields.io/crates/v/egui-wgpu.svg)](https://crates.io/crates/egui-wgpu)

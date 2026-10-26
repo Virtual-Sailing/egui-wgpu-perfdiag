@@ -30,6 +30,7 @@ pub use setup::{NativeAdapterSelectorMethod, WgpuSetup, WgpuSetupCreateNew, Wgpu
 
 /// Helpers for capturing screenshots of the UI.
 pub mod capture;
+pub mod timing;
 
 /// Module for painting [`egui`](https://github.com/emilk/egui) with [`wgpu`] on [`winit`].
 #[cfg(feature = "winit")]
@@ -302,7 +303,18 @@ pub struct WgpuConfiguration {
 
     /// Callback for surface errors.
     pub on_surface_error: Arc<dyn Fn(wgpu::SurfaceError) -> SurfaceErrorAction + Send + Sync>,
+
+    /// Called immediately before presenting a native window surface.
+    /// Can install or query native presentation feedback without owning the surface.
+    pub on_present: Option<Arc<PresentCallback>>,
+    /// Optional native painter CPU measurements.
+    pub on_paint_timing: Option<Arc<timing::PaintObserver>>,
+    /// Optional GPU pass timestamps, enabled independently at runtime.
+    pub gpu_profiler: Option<Arc<timing::GpuProfiler>>,
 }
+
+/// Native surface presentation observer. Must not reconfigure or present the surface.
+pub type PresentCallback = dyn Fn(egui::ViewportId, &wgpu::Surface<'_>) + Send + Sync;
 
 #[test]
 fn wgpu_config_impl_send_sync() {
@@ -317,6 +329,9 @@ impl std::fmt::Debug for WgpuConfiguration {
             desired_maximum_frame_latency,
             wgpu_setup,
             on_surface_error: _,
+            on_present: _,
+            on_paint_timing: _,
+            gpu_profiler: _,
         } = self;
         f.debug_struct("WgpuConfiguration")
             .field("present_mode", &present_mode)
@@ -335,6 +350,9 @@ impl Default for WgpuConfiguration {
             present_mode: wgpu::PresentMode::AutoVsync,
             desired_maximum_frame_latency: None,
             wgpu_setup: Default::default(),
+            on_present: None,
+            on_paint_timing: None,
+            gpu_profiler: None,
             on_surface_error: Arc::new(|err| {
                 if err == wgpu::SurfaceError::Outdated {
                     // This error occurs when the app is minimized on Windows.
