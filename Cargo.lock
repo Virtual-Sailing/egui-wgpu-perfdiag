@@ -2107,7 +2107,7 @@ dependencies = [
 [[package]]
 name = "wgpu-hal"
 version = "27.0.4"
-source = "git+https://github.com/clammet/wgpu-hal-perfdiag.git?rev=ea57c36d077a2b4f363a425429dd2d7ffe285122#ea57c36d077a2b4f363a425429dd2d7ffe285122"
+source = "git+https://github.com/Virtual-Sailing/wgpu-hal-perfdiag.git?rev=050b39ce5d932d091a05e62882eae980c775d6ec#050b39ce5d932d091a05e62882eae980c775d6ec"
 dependencies = [
  "android_system_properties",
  "arrayvec",

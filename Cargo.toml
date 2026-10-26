@@ -342,4 +342,4 @@ upstream-archive-sha256 = "5e4d209971c84b2352a06174abdba701af1e552ce56b144d96f2b
 
 # Used by this crate's standalone tests; consuming applications must also patch HAL.
 [patch.crates-io]
-wgpu-hal = { git = "https://github.com/clammet/wgpu-hal-perfdiag.git", rev = "ea57c36d077a2b4f363a425429dd2d7ffe285122" }
+wgpu-hal = { git = "https://github.com/Virtual-Sailing/wgpu-hal-perfdiag.git", rev = "050b39ce5d932d091a05e62882eae980c775d6ec" }
